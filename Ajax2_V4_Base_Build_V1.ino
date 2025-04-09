@@ -58,7 +58,7 @@ Ben
 // Please check this area everytime you upload! 
 // If in doubt, use 'false' state during races.
 
-bool DEBUG          = false;   // This must be true for any debug commands to work
+bool DEBUG          = true;   // This must be true for any debug commands to work
 bool debugRamp      = false;  // Extra failsafe for the start up test ramp - will ramp motor in the setup to check motor drive is working. 
 const int debugPwm  = 700;    // Steady-state speed of the motor after debugRamp in setup, for debug testing. Only used if debugRamp = true. 
 
@@ -258,6 +258,13 @@ void IRAM_ATTR isr() {
   motorPoll++; // every time interrupt is triggered, add one to poll count. 
 }
 
+////////////////////////
+//     LoRa Setup     //
+////////////////////////
+#include "Wire.h"
+#define I2C_DEV_ADDR 0x55
+uint32_t i = 0;
+
 /////////////////////////////////////////////////////
 
 /////////////////////////////////////////////////////
@@ -279,8 +286,7 @@ void setup()
     Serial.println("Card Mount Failed");
   }
   // Add ", Variable_Name" to the string if you have added a variable to be logged. e.g. "TIME, BV, MV, C, RPM, AmpHours"
-  appendTitle(SD, "/HadesData.txt", "TIME, BV, MV, C, RPM");
-
+  appendTitle(SD, "/log.txt", "TIME, BV, MV, C, RPM");
 
   // Setup Driver Inputs
   pinMode(TH1, INPUT);
@@ -288,46 +294,42 @@ void setup()
   pinMode(IN1, INPUT);
   pinMode(IN2, INPUT);
 
-
   // RPM Interrupt
   attachInterrupt(rpmPin, isr, RISING);
-
 
   // Start ADS1115 ADC module
   if (!ads.begin())
   {
     Serial.println("Failed to initialize ADS.");
-    while (1);
+    // while (1);
   } 
-  ads.setGain(GAIN_ONE);
-
+//  ads.setGain(GAIN_ONE);
 
   // ADC Zeroing
   int adcAverage = 0;
-  for (int i = 0; i<offsetSmoothing; i++)
-  { 
-    adcAverage = adcAverage + ads.readADC_SingleEnded(2);
-  } 
+//  for (int i = 0; i<offsetSmoothing; i++)
+//  { 
+//    adcAverage = adcAverage + ads.readADC_SingleEnded(2);
+//  } 
   zeroingValue = adcAverage/offsetSmoothing;
 
 
   // initiate soft start checking
   waitKey = millis();  
 
-
   // Set Motor PWM Channel and Frequency.
-  ledcSetup(pwmChannela, freq, resolution);
-  ledcAttachPin(PWMa, pwmChannela);
-
+  ledcAttach(pwmChannela, freq, resolution);
+//  ledcAttachPin(PWMa, pwmChannela);
 
   // Set Fan PWM Channel and Frequency.
-  ledcSetup(pwmChannelb, freq, resolution);
-  ledcAttachPin(PWMb, pwmChannelb);
-
+  ledcAttach(pwmChannelb, freq, resolution);
+//  ledcAttachPin(PWMb, pwmChannelb);
 
   // Set initial fan state.
   updateFan();
 
+  // for LoRa I2C transmission
+  Wire.begin();
 
   //////////////////////////////////////
   //------- DANGER DEBUG ONLY! -------//
@@ -367,7 +369,7 @@ void loop(){
 
 
   // Get Sensor Variables
-  getSensorData();
+//  getSensorData();
 
   //Checks if time dependant operations are needed.
   timer();
@@ -379,6 +381,7 @@ void loop(){
   // Main Control Loop Start // 
   /////////////////////////////
 
+  // [TODO] update to single throttle pin
   // Throttle ON state = LOW, Operations to be completed:
   if(throttle1 == LOW || throttle2 == LOW)
   {
@@ -431,7 +434,6 @@ void loop(){
         throttlePickup();
     }
 
-    
   }
 
   // Throttle OFF state = HIGH, Operations to be completed:
@@ -470,6 +472,23 @@ void loop(){
   
   // Output Resolved PWM
   ledcWrite(pwmChannela, pwm);
+
+  // I2C output for LoRa
+  // Write message to the slave
+  Wire.beginTransmission(I2C_DEV_ADDR);
+  Wire.printf("Hello World! %lu", i++);
+  uint8_t error = Wire.endTransmission(true);
+  Serial.printf("endTransmission: %u\n", error);
+
+  // Read 16 bytes from the slave
+  uint8_t bytesReceived = Wire.requestFrom(I2C_DEV_ADDR, 16);
+  
+  Serial.printf("requestFrom: %u\n", bytesReceived);
+  if ((bool)bytesReceived) {  //If received more than zero bytes
+    uint8_t temp[bytesReceived];
+    Wire.readBytes(temp, bytesReceived);
+    log_print_buf(temp, bytesReceived);
+  }
 }
 
 /////////////////////////////////////////////////////
@@ -784,6 +803,6 @@ void saveData()
   // Super inefficient use of RAM but super reliable, and since the esp32 is a beast we don't care about RAM usage. 
   // If you add a variable to the String of data, please add a suitable "varible_name," to the appendTitle() function in the Setup() function.
   String (dataString) = "\n" + String(raceTime) + "," + String(batteryVoltage) + "," + String(motorVoltage) + "," + String(Current) + "," + String(RPM);
-  appendData(SD, "/HadesData.txt", dataString);
+  appendData(SD, "/log.txt", dataString);
   
 }
